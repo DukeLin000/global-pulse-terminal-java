@@ -1,9 +1,7 @@
 package org.example.globalpulseterminaljava.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.example.globalpulseterminaljava.dto.ApiErrorResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -19,11 +17,9 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
 
     private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
     private final AppProperties appProperties;
-    private final ObjectMapper objectMapper;
 
-    public RateLimitingInterceptor(AppProperties appProperties, ObjectMapper objectMapper) {
+    public RateLimitingInterceptor(AppProperties appProperties) {
         this.appProperties = appProperties;
-        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -39,17 +35,9 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
             }
 
             if (bucket.counter.incrementAndGet() > appProperties.getRateLimit().getRequestsPerMinute()) {
-                ApiErrorResponse error = new ApiErrorResponse(
-                        Instant.now(),
-                        HttpStatus.TOO_MANY_REQUESTS.value(),
-                        HttpStatus.TOO_MANY_REQUESTS.getReasonPhrase(),
-                        "RATE_LIMIT_EXCEEDED",
-                        "Rate limit exceeded",
-                        request.getRequestURI()
-                );
                 response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
                 response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                response.getWriter().write(objectMapper.writeValueAsString(error));
+                response.getWriter().write(buildRateLimitJson(request.getRequestURI()));
                 return false;
             }
         }
@@ -69,6 +57,18 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
         }
 
         return request.getRemoteAddr();
+    }
+
+    private String buildRateLimitJson(String path) {
+        String safePath = path == null ? "" : path.replace("\"", "\\\"");
+        return "{" +
+                "\"timestamp\":\"" + Instant.now() + "\"," +
+                "\"status\":429," +
+                "\"error\":\"Too Many Requests\"," +
+                "\"code\":\"RATE_LIMIT_EXCEEDED\"," +
+                "\"message\":\"Rate limit exceeded\"," +
+                "\"path\":\"" + safePath + "\"" +
+                "}";
     }
 
     private static final class Bucket {
