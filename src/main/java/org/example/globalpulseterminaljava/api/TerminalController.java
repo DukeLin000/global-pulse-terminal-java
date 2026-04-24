@@ -6,10 +6,13 @@ import org.example.globalpulseterminaljava.dto.TerminalDtos.AlertAckResponse;
 import org.example.globalpulseterminaljava.dto.TerminalDtos.ConflictItem;
 import org.example.globalpulseterminaljava.dto.TerminalDtos.ConflictZone;
 import org.example.globalpulseterminaljava.dto.TerminalDtos.GlobeRoute;
+import org.example.globalpulseterminaljava.dto.TerminalDtos.HealthResponse;
 import org.example.globalpulseterminaljava.dto.TerminalDtos.LiveNewsSource;
 import org.example.globalpulseterminaljava.dto.TerminalDtos.NewsItem;
 import org.example.globalpulseterminaljava.dto.TerminalDtos.SnapshotResponse;
 import org.example.globalpulseterminaljava.service.TerminalDataService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,15 +28,23 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/v1")
 public class TerminalController {
 
+    private static final Logger log = LoggerFactory.getLogger(TerminalController.class);
+
     private final TerminalDataService terminalDataService;
 
     public TerminalController(TerminalDataService terminalDataService) {
         this.terminalDataService = terminalDataService;
+    }
+
+    @GetMapping("/health")
+    public HealthResponse health() {
+        return new HealthResponse("UP", "global-pulse-terminal-java", Instant.now().toEpochMilli());
     }
 
     @GetMapping("/terminal/snapshot")
@@ -43,7 +54,7 @@ public class TerminalController {
             @RequestParam(required = false) String include
     ) {
         List<String> includeFields = StringUtils.hasText(include) ? Arrays.stream(include.split(",")).map(String::trim).toList() : List.of();
-        return terminalDataService.snapshot(region, includeFields);
+        return terminalDataService.snapshot(region, q, includeFields);
     }
 
     @GetMapping("/news")
@@ -96,13 +107,36 @@ public class TerminalController {
     }
 
     @GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@RequestParam(required = false, defaultValue = "global") String region) throws IOException {
-        SseEmitter emitter = new SseEmitter(30_000L);
-        emitter.send(SseEmitter.event().name("snapshot.updated").data(terminalDataService.snapshot(region, List.of())));
-        emitter.send(SseEmitter.event().name("conflict.spike").data(terminalDataService.queryConflicts(region, 75.0, "score")));
-        emitter.send(SseEmitter.event().name("alert.created").data(terminalDataService.queryAlerts(null, null, 1)));
-        emitter.send(SseEmitter.event().name("news.breaking").data(terminalDataService.queryNews(region, null, 5, null, null).stream().filter(NewsItem::breaking).toList()));
-        emitter.complete();
+    public SseEmitter stream(@RequestParam(required = false, defaultValue = "global") String region) {
+        SseEmitter emitter = new SseEmitter(31_000L);
+
+        CompletableFuture.runAsync(() -> {
+            long startedAt = System.currentTimeMillis();
+            try {
+                emitter.send(SseEmitter.event().name("snapshot.updated").data(terminalDataService.snapshot(region, null, List.of())));
+                emitter.send(SseEmitter.event().name("conflict.spike").data(terminalDataService.queryConflicts(region, 75.0, "score")));
+                emitter.send(SseEmitter.event().name("alert.created").data(terminalDataService.queryAlerts(null, null, 1)));
+                emitter.send(SseEmitter.event().name("news.breaking").data(terminalDataService.queryNews(region, null, 5, null, null).stream().filter(NewsItem::breaking).toList()));
+
+                while ((System.currentTimeMillis() - startedAt) < 30_000) {
+                    emitter.send(SseEmitter.event()
+                            .name("heartbeat")
+                            .data(Map.of("serverTime", Instant.now().toEpochMilli())));
+                    Thread.sleep(10_000L);
+                }
+
+                emitter.complete();
+            } catch (IOException | IllegalStateException ignored) {
+                emitter.complete();
+            } catch (InterruptedException interruptedException) {
+                Thread.currentThread().interrupt();
+                emitter.complete();
+            } catch (Exception ex) {
+                log.debug("SSE stream completed with exception: {}", ex.getMessage());
+                emitter.complete();
+            }
+        });
+
         return emitter;
     }
 }

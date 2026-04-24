@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: global-pulse-terminal-java
+  mvc:
+    throw-exception-if-no-handler-found: true
+  web:
+    resources:
+      add-mappings: false
+
+app:
+  cors:
+    allowed-origins:
+      - http://localhost:3000
+      - http://127.0.0.1:3000
+  rate-limit:
+    requests-per-minute: 120

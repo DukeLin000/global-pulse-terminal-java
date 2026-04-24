@@ -93,6 +93,9 @@ public final class TerminalDtos {
     ) {
     }
 
+    public record HealthResponse(String status, String service, long serverTime) {
+    }
+
     public record StreamEvent(String event, Object payload, long serverTime) {
     }
 }

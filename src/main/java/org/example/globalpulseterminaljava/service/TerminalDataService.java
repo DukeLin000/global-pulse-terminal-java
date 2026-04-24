@@ -19,7 +19,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Stream;
@@ -39,10 +38,10 @@ public class TerminalDataService {
     }
 
     @Cacheable("snapshot")
-    public SnapshotResponse snapshot(String region, List<String> include) {
+    public SnapshotResponse snapshot(String region, String q, List<String> include) {
         long now = Instant.now().toEpochMilli();
         return new SnapshotResponse(
-                queryNews(region, null, 50, null, null),
+                queryNews(region, q, 50, null, null),
                 queryConflicts(region, null, "score"),
                 includeRequested(include, "sources") ? liveSources() : List.of(),
                 includeRequested(include, "routes") ? routeLayers("all") : Map.of(),
@@ -109,8 +108,12 @@ public class TerminalDataService {
     }
 
     public AlertAckResponse ackAlert(String alertId, String ackBy) {
-        Objects.requireNonNull(alertId, "alertId is required");
-        Objects.requireNonNull(ackBy, "ackBy is required");
+        if (alertId == null || alertId.isBlank()) {
+            throw new IllegalArgumentException("alertId is required");
+        }
+        if (ackBy == null || ackBy.isBlank()) {
+            throw new IllegalArgumentException("ackBy is required");
+        }
 
         Alert current = alerts.stream()
                 .filter(a -> a.id().equals(alertId))
